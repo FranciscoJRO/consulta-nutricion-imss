@@ -72,8 +72,42 @@ CREATE TABLE IF NOT EXISTS pacientes (
 ''')
 conn.commit()
 
-# --- Interfaz ---
+# --- Título e interfaz ---
 st.title("Registro de Pacientes - Consulta Nutrición IMSS")
+
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #ffe6f0;
+        color: #222222;
+    }
+    h1, h2, h3, h4 {
+        color: #cc0066 !important;
+    }
+    label, .stTextInput > label, .stTextArea > label, .stDateInput > label {
+        color: #222222 !important;
+        font-weight: 600;
+    }
+    .stDownloadButton > button, .stButton > button {
+        background-color: #cc0066;
+        color: white !important;
+        border-radius: 8px;
+        font-weight: bold;
+    }
+    .stDownloadButton > button:hover, .stButton > button:hover {
+        background-color: #b30059;
+        color: white !important;
+    }
+    input, textarea {
+        background-color: white !important;
+        color: #000000 !important;
+    }
+    .stRadio * {
+        color: #000000 !important;
+        font-weight: 600 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # OCR desde carnet
 st.subheader("📷 Captura desde carnet del IMSS")
