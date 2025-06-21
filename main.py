@@ -9,12 +9,39 @@ import os
 import requests
 import base64
 
+# --- Función para reducir tamaño de imagen ---
+def reducir_tamano_imagen(imagen_stream, max_size_kb=1024):
+    imagen = Image.open(imagen_stream)
+
+    if imagen.mode in ("RGBA", "P"):
+        imagen = imagen.convert("RGB")
+
+    calidad = 85
+    factor = 0.9
+    buffer = io.BytesIO()
+
+    while True:
+        buffer.seek(0)
+        imagen.save(buffer, format="JPEG", quality=calidad)
+        size_kb = buffer.tell() / 1024
+
+        if size_kb <= max_size_kb or calidad <= 10:
+            break
+
+        calidad -= 5
+        new_size = (int(imagen.size[0] * factor), int(imagen.size[1] * factor))
+        imagen = imagen.resize(new_size, Image.ANTIALIAS)
+
+    buffer.seek(0)
+    return buffer
+
 # --- Función OCR con API OCR.space ---
 def extraer_texto_con_ocr_space(imagen_stream):
     api_key = os.environ["OCR_API_KEY"]
     url_api = "https://api.ocr.space/parse/image"
 
-    image_data = imagen_stream.read()
+    imagen_reducida = reducir_tamano_imagen(imagen_stream)
+    image_data = imagen_reducida.read()
     encoded_image = base64.b64encode(image_data).decode()
 
     payload = {
@@ -229,4 +256,3 @@ if st.button("Ver historial de esa fecha"):
 
 # --- Cerrar conexión ---
 conn.close()
-
