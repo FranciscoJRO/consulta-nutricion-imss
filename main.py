@@ -9,26 +9,12 @@ import os
 import requests
 import base64
 
-# --- Reducir tamaño de imagen ---
-def reducir_tamano(imagen, max_kb=1000):
-    quality = 85
-    output = io.BytesIO()
-    while True:
-        output.seek(0)
-        imagen.save(output, format="JPEG", quality=quality, optimize=True)
-        size_kb = output.tell() / 1024
-        if size_kb <= max_kb or quality < 20:
-            break
-        quality -= 5
-    output.seek(0)
-    return output
-
-# --- OCR con API OCR.space ---
+# --- Función OCR con API OCR.space ---
 def extraer_texto_con_ocr_space(imagen_stream):
     api_key = os.environ["OCR_API_KEY"]
     url_api = "https://api.ocr.space/parse/image"
 
-    image_data = imagen_stream.getvalue()
+    image_data = imagen_stream.read()
     encoded_image = base64.b64encode(image_data).decode()
 
     payload = {
@@ -50,7 +36,7 @@ def extraer_texto_con_ocr_space(imagen_stream):
     else:
         return ""
 
-# --- Conexión a PostgreSQL ---
+# --- Conexión a base de datos PostgreSQL ---
 conn = psycopg2.connect(
     dbname=os.environ["DB_NAME"],
     user=os.environ["DB_USER"],
@@ -118,12 +104,7 @@ nss_extraido = ""
 
 if imagen:
     try:
-        img = Image.open(imagen).convert("RGB")
-        imagen_comprimida = reducir_tamano(img)
-
-        st.info(f"🗜️ Tamaño final de la imagen: {len(imagen_comprimida.getvalue())/1024:.2f} KB")
-
-        texto = extraer_texto_con_ocr_space(imagen_comprimida)
+        texto = extraer_texto_con_ocr_space(imagen)
         st.text_area("🧾 Texto detectado", texto, height=300)
 
         nombre_match = re.search(r'NOMBRE:\s*(.*?)\n(.*?)\n', texto)
@@ -176,6 +157,7 @@ cursor.execute("""
     WHERE TO_DATE(fecha, 'YYYY-MM-DD') >= CURRENT_DATE - INTERVAL '3 days'
     ORDER BY TO_DATE(fecha, 'YYYY-MM-DD') DESC
 """)
+
 datos = cursor.fetchall()
 
 if datos:
@@ -198,6 +180,14 @@ if datos:
         file_name=f"resumen_pacientes_{hoy}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+    st.markdown("""
+    <div style="position: fixed; bottom: 0; left: 0; width: 100%;
+        background-color: #fff3cd; color: #856404;
+        padding: 12px; border-top: 2px solid #ffeeba;
+        font-weight: bold; text-align: center; z-index: 1000;">
+    ⚠️ Antes de cerrar esta página, recuerda descargar el resumen de pacientes con el botón 📥 **Exportar resumen en Excel**.
+    </div>
+    """, unsafe_allow_html=True)
 else:
     st.info("Aún no hay pacientes registrados hoy.")
 
@@ -239,3 +229,4 @@ if st.button("Ver historial de esa fecha"):
 
 # --- Cerrar conexión ---
 conn.close()
+
