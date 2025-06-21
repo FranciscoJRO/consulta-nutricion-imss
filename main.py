@@ -9,12 +9,26 @@ import os
 import requests
 import base64
 
-# --- Función OCR con API OCR.space ---
+# --- Reducir tamaño de imagen si excede 1MB ---
+def reducir_tamano(imagen, max_kb=1000):
+    quality = 85
+    output = io.BytesIO()
+    while True:
+        output.seek(0)
+        imagen.save(output, format="JPEG", quality=quality)
+        size_kb = output.tell() / 1024
+        if size_kb <= max_kb or quality < 10:
+            break
+        quality -= 5
+    output.seek(0)
+    return output
+
+# --- OCR con API OCR.space ---
 def extraer_texto_con_ocr_space(imagen_stream):
     api_key = os.environ["OCR_API_KEY"]
     url_api = "https://api.ocr.space/parse/image"
 
-    image_data = imagen_stream.read()
+    image_data = imagen_stream.getvalue()
     encoded_image = base64.b64encode(image_data).decode()
 
     payload = {
@@ -36,7 +50,7 @@ def extraer_texto_con_ocr_space(imagen_stream):
     else:
         return ""
 
-# --- Conexión a base de datos PostgreSQL ---
+# --- Conexión a PostgreSQL ---
 conn = psycopg2.connect(
     dbname=os.environ["DB_NAME"],
     user=os.environ["DB_USER"],
@@ -58,42 +72,8 @@ CREATE TABLE IF NOT EXISTS pacientes (
 ''')
 conn.commit()
 
-# --- Título e interfaz ---
+# --- Interfaz ---
 st.title("Registro de Pacientes - Consulta Nutrición IMSS")
-
-st.markdown("""
-<style>
-    .stApp {
-        background-color: #ffe6f0;
-        color: #222222;
-    }
-    h1, h2, h3, h4 {
-        color: #cc0066 !important;
-    }
-    label, .stTextInput > label, .stTextArea > label, .stDateInput > label {
-        color: #222222 !important;
-        font-weight: 600;
-    }
-    .stDownloadButton > button, .stButton > button {
-        background-color: #cc0066;
-        color: white !important;
-        border-radius: 8px;
-        font-weight: bold;
-    }
-    .stDownloadButton > button:hover, .stButton > button:hover {
-        background-color: #b30059;
-        color: white !important;
-    }
-    input, textarea {
-        background-color: white !important;
-        color: #000000 !important;
-    }
-    .stRadio * {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # OCR desde carnet
 st.subheader("📷 Captura desde carnet del IMSS")
@@ -104,7 +84,9 @@ nss_extraido = ""
 
 if imagen:
     try:
-        texto = extraer_texto_con_ocr_space(imagen)
+        img = Image.open(imagen).convert("RGB")
+        imagen_comprimida = reducir_tamano(img)
+        texto = extraer_texto_con_ocr_space(imagen_comprimida)
         st.text_area("🧾 Texto detectado", texto, height=300)
 
         nombre_match = re.search(r'NOMBRE:\s*(.*?)\n(.*?)\n', texto)
@@ -155,7 +137,7 @@ hoy = datetime.now().strftime("%Y-%m-%d")
 cursor.execute("""
     SELECT nombre, nss, tipo, nota, fecha FROM pacientes 
     WHERE TO_DATE(fecha, 'YYYY-MM-DD') >= CURRENT_DATE - INTERVAL '3 days'
-    ORDER BY fecha DESC
+    ORDER BY TO_DATE(fecha, 'YYYY-MM-DD') DESC
 """)
 datos = cursor.fetchall()
 
@@ -179,14 +161,6 @@ if datos:
         file_name=f"resumen_pacientes_{hoy}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    st.markdown("""
-    <div style="position: fixed; bottom: 0; left: 0; width: 100%;
-        background-color: #fff3cd; color: #856404;
-        padding: 12px; border-top: 2px solid #ffeeba;
-        font-weight: bold; text-align: center; z-index: 1000;">
-    ⚠️ Antes de cerrar esta página, recuerda descargar el resumen de pacientes con el botón 📥 **Exportar resumen en Excel**.
-    </div>
-    """, unsafe_allow_html=True)
 else:
     st.info("Aún no hay pacientes registrados hoy.")
 
