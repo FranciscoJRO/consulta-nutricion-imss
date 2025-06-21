@@ -30,7 +30,7 @@ def reducir_tamano_imagen(imagen_stream, max_size_kb=1024):
 
         calidad -= 5
         new_size = (int(imagen.size[0] * factor), int(imagen.size[1] * factor))
-        imagen = imagen.resize(new_size, Image.ANTIALIAS)
+        imagen = imagen.resize(new_size, Image.Resampling.LANCZOS)
 
     buffer.seek(0)
     return buffer
@@ -134,11 +134,13 @@ if imagen:
         texto = extraer_texto_con_ocr_space(imagen)
         st.text_area("🧾 Texto detectado", texto, height=300)
 
+        # Extraer nombre
         nombre_match = re.search(r'NOMBRE:\s*(.*?)\n(.*?)\n', texto)
         if nombre_match:
             nombre_extraido = f"{nombre_match.group(1).strip()} {nombre_match.group(2).strip()}"
             st.success(f"✅ Nombre detectado: {nombre_extraido}")
 
+        # Extraer NSS
         texto_limpio = texto.replace(" ", "").replace("-", "").replace("\n", "")
         posibles_nss = re.findall(r'\d{11}', texto_limpio)
 
@@ -147,12 +149,13 @@ if imagen:
             st.success(f"✅ NSS detectado: {nss_extraido}")
         else:
             for linea in texto.split("\n"):
-                if re.search(r'seg.*social', linea, re.IGNORECASE):
+                if re.search(r'(datos|nss|seguridad|general)', linea, re.IGNORECASE):
                     digitos = re.findall(r'\d', linea)
                     if len(digitos) >= 11:
                         nss_extraido = ''.join(digitos[:11])
-                        st.success(f"✅ NSS detectado por línea: {nss_extraido}")
+                        st.success(f"✅ NSS detectado por contexto: {nss_extraido}")
                         break
+
     except Exception as e:
         st.error(f"❌ Error en OCR: {e}")
         st.info("💡 Puedes ingresar manualmente los datos del paciente abajo")
