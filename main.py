@@ -154,7 +154,7 @@ st.subheader("Resumen de pacientes de hoy")
 hoy = datetime.now().strftime("%Y-%m-%d")
 cursor.execute("""
     SELECT nombre, nss, tipo, nota, fecha FROM pacientes 
-    WHERE fecha >= CURRENT_DATE - INTERVAL '3 days'
+    WHERE TO_DATE(fecha, 'YYYY-MM-DD') >= CURRENT_DATE - INTERVAL '3 days'
     ORDER BY fecha DESC
 """)
 datos = cursor.fetchall()
