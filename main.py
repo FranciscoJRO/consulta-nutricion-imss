@@ -9,15 +9,15 @@ import os
 import requests
 import base64
 
-# --- Reducir tamaño de imagen si excede 1MB ---
+# --- Reducir tamaño de imagen ---
 def reducir_tamano(imagen, max_kb=1000):
     quality = 85
     output = io.BytesIO()
     while True:
         output.seek(0)
-        imagen.save(output, format="JPEG", quality=quality)
+        imagen.save(output, format="JPEG", quality=quality, optimize=True)
         size_kb = output.tell() / 1024
-        if size_kb <= max_kb or quality < 10:
+        if size_kb <= max_kb or quality < 20:
             break
         quality -= 5
     output.seek(0)
@@ -120,6 +120,9 @@ if imagen:
     try:
         img = Image.open(imagen).convert("RGB")
         imagen_comprimida = reducir_tamano(img)
+
+        st.info(f"🗜️ Tamaño final de la imagen: {len(imagen_comprimida.getvalue())/1024:.2f} KB")
+
         texto = extraer_texto_con_ocr_space(imagen_comprimida)
         st.text_area("🧾 Texto detectado", texto, height=300)
 
