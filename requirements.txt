@@ -3,3 +3,4 @@ pytesseract
 pillow
 pandas
 openpyxl
+psycopg2-binary

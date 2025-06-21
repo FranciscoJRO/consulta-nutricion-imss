@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3
+import psycopg2
 from datetime import datetime
 import pandas as pd
 import io
@@ -51,12 +51,22 @@ except Exception as e:
     IDIOMA_OCR = 'eng'
 
 # --- Conexión a base de datos ---
-conn = sqlite3.connect('pacientes.db')
+import psycopg2
+
+conn = psycopg2.connect(
+    dbname=os.environ["DB_NAME"],
+    user=os.environ["DB_USER"],
+    password=os.environ["DB_PASSWORD"],
+    host=os.environ["DB_HOST"],
+    port=os.environ["DB_PORT"]
+)
 cursor = conn.cursor()
 
+
+# Crear tabla si no existe
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS pacientes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     nombre TEXT NOT NULL,
     nss TEXT NOT NULL,
     tipo TEXT NOT NULL,
