@@ -4,55 +4,39 @@ from datetime import datetime
 import pandas as pd
 import io
 from PIL import Image
-import pytesseract
 import re
 import os
+import requests
+import base64
 
-# Configuración de Tesseract mejorada
-pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'
+# --- Función OCR con API OCR.space ---
+def extraer_texto_con_ocr_space(imagen_stream):
+    api_key = os.environ["OCR_API_KEY"]
+    url_api = "https://api.ocr.space/parse/image"
 
-# Función para encontrar tessdata
-def find_tessdata_path():
-    possible_paths = [
-        "/opt/homebrew/Cellar/tesseract-lang/4.1.0/share/tessdata",  # Ubicación real
-        "/opt/homebrew/Cellar/tesseract/5.4.1_2/share/tessdata",     # Copia en tesseract
-        "/opt/homebrew/share/tessdata",                               # Ubicación estándar
-        "/usr/local/share/tessdata"                                   # Ubicación alternativa
-    ]
-    
-    for path in possible_paths:
-        spa_file = os.path.join(path, "spa.traineddata")
-        if os.path.isfile(spa_file):  # Verificar que es un archivo real, no un enlace roto
-            print(f"✅ Encontrado spa.traineddata en: {path}")
-            return path
-    
-    print("❌ No se encontró spa.traineddata en ninguna ubicación")
-    return None
+    image_data = imagen_stream.read()
+    encoded_image = base64.b64encode(image_data).decode()
 
-# Encontrar y establecer la ruta correcta
-tessdata_path = find_tessdata_path()
-if tessdata_path:
-    os.environ["TESSDATA_PREFIX"] = tessdata_path
-    print(f"✅ TESSDATA_PREFIX configurado: {tessdata_path}")
-else:
-    # Fallback a la ubicación que sabemos que existe
-    fallback_path = "/opt/homebrew/Cellar/tesseract-lang/4.1.0/share/tessdata"
-    os.environ["TESSDATA_PREFIX"] = fallback_path
-    print(f"⚠️  Usando ruta fallback: {fallback_path}")
+    payload = {
+        'apikey': api_key,
+        'language': 'spa',
+        'isOverlayRequired': False,
+        'base64Image': f'data:image/jpeg;base64,{encoded_image}',
+    }
 
-# Verificar idiomas disponibles
-try:
-    idiomas_disponibles = pytesseract.get_languages()
-    print("Idiomas disponibles:", idiomas_disponibles)
-    IDIOMA_OCR = 'spa' if 'spa' in idiomas_disponibles else 'eng'
-    print(f"Usando idioma: {IDIOMA_OCR}")
-except Exception as e:
-    print(f"Error verificando idiomas: {e}")
-    IDIOMA_OCR = 'eng'
+    response = requests.post(url_api, data=payload)
+    result = response.json()
 
-# --- Conexión a base de datos ---
-import psycopg2
+    if result.get("IsErroredOnProcessing"):
+        raise Exception(result.get("ErrorMessage", ["Error desconocido"])[0])
 
+    parsed_results = result.get("ParsedResults")
+    if parsed_results:
+        return parsed_results[0]["ParsedText"]
+    else:
+        return ""
+
+# --- Conexión a base de datos PostgreSQL ---
 conn = psycopg2.connect(
     dbname=os.environ["DB_NAME"],
     user=os.environ["DB_USER"],
@@ -62,8 +46,6 @@ conn = psycopg2.connect(
 )
 cursor = conn.cursor()
 
-
-# Crear tabla si no existe
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS pacientes (
     id SERIAL PRIMARY KEY,
@@ -76,26 +58,22 @@ CREATE TABLE IF NOT EXISTS pacientes (
 ''')
 conn.commit()
 
-# --- Título ---
+# --- Título e interfaz ---
 st.title("Registro de Pacientes - Consulta Nutrición IMSS")
 
 st.markdown("""
-    <style>
+<style>
     .stApp {
         background-color: #ffe6f0;
         color: #222222;
     }
-
     h1, h2, h3, h4 {
         color: #cc0066 !important;
     }
-
     label, .stTextInput > label, .stTextArea > label, .stDateInput > label {
         color: #222222 !important;
         font-weight: 600;
     }
-
-    /* Botones */
     .stDownloadButton > button, .stButton > button {
         background-color: #cc0066;
         color: white !important;
@@ -106,132 +84,18 @@ st.markdown("""
         background-color: #b30059;
         color: white !important;
     }
-
     input, textarea {
         background-color: white !important;
         color: #000000 !important;
     }
-
-    /* FORZAR TEXTO NEGRO EN RADIO BUTTONS - SELECTORES MÁS AGRESIVOS */
     .stRadio * {
         color: #000000 !important;
         font-weight: 600 !important;
     }
-    
-    .stRadio > div {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    .stRadio > div > div {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    .stRadio > div > div > label {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    .stRadio label {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Contenedor principal de radio buttons */
-    div[role='radiogroup'] {
-        color: #000000 !important;
-    }
-    
-    div[role='radiogroup'] * {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Cada opción individual */
-    div[role='radiogroup'] > div {
-        color: #000000 !important;
-    }
-    
-    /* Labels específicos de cada radio button */
-    div[role='radiogroup'] > div > label {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Todos los elementos dentro del radiogroup */
-    div[role='radiogroup'] > div > label * {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Texto dentro de los spans */
-    div[role='radiogroup'] > div > label > div > span {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Para asegurar que todos los elementos span tengan color negro */
-    div[data-baseweb="radio"] {
-        color: #000000 !important;
-    }
-    
-    div[data-baseweb="radio"] * {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    div[data-baseweb="radio"] span {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Selector más específico para el texto de las opciones */
-    .stRadio label span {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    .stRadio span {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Selectores súper específicos */
-    [data-testid="stRadio"] {
-        color: #000000 !important;
-    }
-    
-    [data-testid="stRadio"] * {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    [data-testid="stRadio"] label {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-    
-    [data-testid="stRadio"] span {
-        color: #000000 !important;
-        font-weight: 600 !important;
-    }
-
-    /* Estilo para mensajes tipo st.info, st.warning, etc. */
-    .stAlert {
-        background-color: #f8d8e8 !important;
-        border: 1px solid #f06292;
-        color: #333333 !important;
-        font-weight: 500;
-    }
-    .stAlert > div {
-        color: #333333 !important;
-    }
-    </style>
+</style>
 """, unsafe_allow_html=True)
 
-
-# OCR desde imagen del carnet
+# OCR desde carnet
 st.subheader("📷 Captura desde carnet del IMSS")
 
 imagen = st.file_uploader("Toma o sube una foto del carnet", type=["png", "jpg", "jpeg"])
@@ -239,9 +103,8 @@ nombre_extraido = ""
 nss_extraido = ""
 
 if imagen:
-    img = Image.open(imagen)
     try:
-        texto = pytesseract.image_to_string(img, lang=IDIOMA_OCR)
+        texto = extraer_texto_con_ocr_space(imagen)
         st.text_area("🧾 Texto detectado", texto, height=300)
 
         nombre_match = re.search(r'NOMBRE:\s*(.*?)\n(.*?)\n', texto)
@@ -249,7 +112,6 @@ if imagen:
             nombre_extraido = f"{nombre_match.group(1).strip()} {nombre_match.group(2).strip()}"
             st.success(f"✅ Nombre detectado: {nombre_extraido}")
 
-              # Extraer NSS mejorado
         texto_limpio = texto.replace(" ", "").replace("-", "").replace("\n", "")
         posibles_nss = re.findall(r'\d{11}', texto_limpio)
 
@@ -257,7 +119,6 @@ if imagen:
             nss_extraido = posibles_nss[0]
             st.success(f"✅ NSS detectado: {nss_extraido}")
         else:
-            # Intento alterno: buscar línea que contenga palabras clave
             for linea in texto.split("\n"):
                 if re.search(r'seg.*social', linea, re.IGNORECASE):
                     digitos = re.findall(r'\d', linea)
@@ -265,7 +126,6 @@ if imagen:
                         nss_extraido = ''.join(digitos[:11])
                         st.success(f"✅ NSS detectado por línea: {nss_extraido}")
                         break
-
     except Exception as e:
         st.error(f"❌ Error en OCR: {e}")
         st.info("💡 Puedes ingresar manualmente los datos del paciente abajo")
@@ -283,7 +143,7 @@ if st.button("Guardar consulta"):
         fecha = datetime.now().strftime("%Y-%m-%d")
         cursor.execute("""
             INSERT INTO pacientes (nombre, nss, tipo, nota, fecha)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
         """, (nombre, nss, tipo, nota, fecha))
         conn.commit()
         st.success("Consulta guardada correctamente.")
@@ -294,10 +154,9 @@ st.subheader("Resumen de pacientes de hoy")
 hoy = datetime.now().strftime("%Y-%m-%d")
 cursor.execute("""
     SELECT nombre, nss, tipo, nota, fecha FROM pacientes 
-    WHERE DATE(fecha) >= DATE('now', '-3 day')
+    WHERE fecha >= CURRENT_DATE - INTERVAL '3 days'
     ORDER BY fecha DESC
 """)
-
 datos = cursor.fetchall()
 
 if datos:
@@ -321,23 +180,13 @@ if datos:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     st.markdown("""
-    <div style="
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        background-color: #fff3cd;
-        color: #856404;
-        padding: 12px;
-        border-top: 2px solid #ffeeba;
-        font-weight: bold;
-        text-align: center;
-        z-index: 1000;
-    ">
+    <div style="position: fixed; bottom: 0; left: 0; width: 100%;
+        background-color: #fff3cd; color: #856404;
+        padding: 12px; border-top: 2px solid #ffeeba;
+        font-weight: bold; text-align: center; z-index: 1000;">
     ⚠️ Antes de cerrar esta página, recuerda descargar el resumen de pacientes con el botón 📥 **Exportar resumen en Excel**.
     </div>
     """, unsafe_allow_html=True)
-
 else:
     st.info("Aún no hay pacientes registrados hoy.")
 
@@ -346,7 +195,7 @@ st.subheader("🔍 Buscar paciente por NSS")
 buscar_nss = st.text_input("Escribe el NSS a buscar")
 
 if buscar_nss.strip():
-    cursor.execute("SELECT nombre, tipo, nota, fecha FROM pacientes WHERE nss = ?", (buscar_nss,))
+    cursor.execute("SELECT nombre, tipo, nota, fecha FROM pacientes WHERE nss = %s", (buscar_nss,))
     resultados = cursor.fetchall()
     if resultados:
         for r in resultados:
@@ -364,7 +213,7 @@ fecha_busqueda = st.date_input("Selecciona una fecha", value=datetime.now())
 fecha_str = fecha_busqueda.strftime("%Y-%m-%d")
 
 if st.button("Ver historial de esa fecha"):
-    cursor.execute("SELECT nombre, nss, tipo, nota FROM pacientes WHERE fecha = ?", (fecha_str,))
+    cursor.execute("SELECT nombre, nss, tipo, nota FROM pacientes WHERE fecha = %s", (fecha_str,))
     historial = cursor.fetchall()
     if historial:
         st.markdown(f"### Pacientes del {fecha_str}")
@@ -379,4 +228,3 @@ if st.button("Ver historial de esa fecha"):
 
 # --- Cerrar conexión ---
 conn.close()
-
