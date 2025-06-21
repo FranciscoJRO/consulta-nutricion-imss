@@ -3,6 +3,52 @@ import sqlite3
 from datetime import datetime
 import pandas as pd
 import io
+from PIL import Image
+import pytesseract
+import re
+import os
+
+# Configuración de Tesseract mejorada
+pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'
+
+# Función para encontrar tessdata
+def find_tessdata_path():
+    possible_paths = [
+        "/opt/homebrew/Cellar/tesseract-lang/4.1.0/share/tessdata",  # Ubicación real
+        "/opt/homebrew/Cellar/tesseract/5.4.1_2/share/tessdata",     # Copia en tesseract
+        "/opt/homebrew/share/tessdata",                               # Ubicación estándar
+        "/usr/local/share/tessdata"                                   # Ubicación alternativa
+    ]
+    
+    for path in possible_paths:
+        spa_file = os.path.join(path, "spa.traineddata")
+        if os.path.isfile(spa_file):  # Verificar que es un archivo real, no un enlace roto
+            print(f"✅ Encontrado spa.traineddata en: {path}")
+            return path
+    
+    print("❌ No se encontró spa.traineddata en ninguna ubicación")
+    return None
+
+# Encontrar y establecer la ruta correcta
+tessdata_path = find_tessdata_path()
+if tessdata_path:
+    os.environ["TESSDATA_PREFIX"] = tessdata_path
+    print(f"✅ TESSDATA_PREFIX configurado: {tessdata_path}")
+else:
+    # Fallback a la ubicación que sabemos que existe
+    fallback_path = "/opt/homebrew/Cellar/tesseract-lang/4.1.0/share/tessdata"
+    os.environ["TESSDATA_PREFIX"] = fallback_path
+    print(f"⚠️  Usando ruta fallback: {fallback_path}")
+
+# Verificar idiomas disponibles
+try:
+    idiomas_disponibles = pytesseract.get_languages()
+    print("Idiomas disponibles:", idiomas_disponibles)
+    IDIOMA_OCR = 'spa' if 'spa' in idiomas_disponibles else 'eng'
+    print(f"Usando idioma: {IDIOMA_OCR}")
+except Exception as e:
+    print(f"Error verificando idiomas: {e}")
+    IDIOMA_OCR = 'eng'
 
 # --- Conexión a base de datos ---
 conn = sqlite3.connect('pacientes.db')
@@ -175,10 +221,49 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- Registro de paciente ---
+# OCR desde imagen del carnet
+st.subheader("📷 Captura desde carnet del IMSS")
+
+imagen = st.file_uploader("Toma o sube una foto del carnet", type=["png", "jpg", "jpeg"])
+nombre_extraido = ""
+nss_extraido = ""
+
+if imagen:
+    img = Image.open(imagen)
+    try:
+        texto = pytesseract.image_to_string(img, lang=IDIOMA_OCR)
+        st.text_area("🧾 Texto detectado", texto, height=300)
+
+        nombre_match = re.search(r'NOMBRE:\s*(.*?)\n(.*?)\n', texto)
+        if nombre_match:
+            nombre_extraido = f"{nombre_match.group(1).strip()} {nombre_match.group(2).strip()}"
+            st.success(f"✅ Nombre detectado: {nombre_extraido}")
+
+              # Extraer NSS mejorado
+        texto_limpio = texto.replace(" ", "").replace("-", "").replace("\n", "")
+        posibles_nss = re.findall(r'\d{11}', texto_limpio)
+
+        if posibles_nss:
+            nss_extraido = posibles_nss[0]
+            st.success(f"✅ NSS detectado: {nss_extraido}")
+        else:
+            # Intento alterno: buscar línea que contenga palabras clave
+            for linea in texto.split("\n"):
+                if re.search(r'seg.*social', linea, re.IGNORECASE):
+                    digitos = re.findall(r'\d', linea)
+                    if len(digitos) >= 11:
+                        nss_extraido = ''.join(digitos[:11])
+                        st.success(f"✅ NSS detectado por línea: {nss_extraido}")
+                        break
+
+    except Exception as e:
+        st.error(f"❌ Error en OCR: {e}")
+        st.info("💡 Puedes ingresar manualmente los datos del paciente abajo")
+
+# Registro de paciente
 tipo = st.radio("Tipo de paciente", ["Nuevo", "Subsecuente"])
-nombre = st.text_input("Nombre del paciente")
-nss = st.text_input("Número de Seguridad Social (NSS)")
+nombre = st.text_input("Nombre del paciente", value=nombre_extraido)
+nss = st.text_input("Número de Seguridad Social (NSS)", value=nss_extraido)
 nota = st.text_area("Nota de la consulta")
 
 if st.button("Guardar consulta"):
@@ -192,11 +277,17 @@ if st.button("Guardar consulta"):
         """, (nombre, nss, tipo, nota, fecha))
         conn.commit()
         st.success("Consulta guardada correctamente.")
+        st.rerun()
 
 # --- Resumen del día ---
 st.subheader("Resumen de pacientes de hoy")
 hoy = datetime.now().strftime("%Y-%m-%d")
-cursor.execute("SELECT nombre, nss, tipo, nota, fecha FROM pacientes WHERE fecha = ?", (hoy,))
+cursor.execute("""
+    SELECT nombre, nss, tipo, nota, fecha FROM pacientes 
+    WHERE DATE(fecha) >= DATE('now', '-3 day')
+    ORDER BY fecha DESC
+""")
+
 datos = cursor.fetchall()
 
 if datos:
@@ -219,6 +310,24 @@ if datos:
         file_name=f"resumen_pacientes_{hoy}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+    st.markdown("""
+    <div style="
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background-color: #fff3cd;
+        color: #856404;
+        padding: 12px;
+        border-top: 2px solid #ffeeba;
+        font-weight: bold;
+        text-align: center;
+        z-index: 1000;
+    ">
+    ⚠️ Antes de cerrar esta página, recuerda descargar el resumen de pacientes con el botón 📥 **Exportar resumen en Excel**.
+    </div>
+    """, unsafe_allow_html=True)
+
 else:
     st.info("Aún no hay pacientes registrados hoy.")
 
@@ -260,3 +369,4 @@ if st.button("Ver historial de esa fecha"):
 
 # --- Cerrar conexión ---
 conn.close()
+
